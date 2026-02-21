@@ -1,0 +1,44 @@
+name: 'APIVerve Email Validation'
+description: 'Validate email addresses, check deliverability, and verify email authentication records'
+author: 'APIVerve'
+branding:
+  icon: 'mail'
+  color: 'blue'
+
+inputs:
+  api_key:
+    description: 'Your APIVerve API key. Can also be set via APIVERVE_API_KEY env var.'
+    required: false
+  api:
+    description: 'The API to use. Options: emailvalidator, disposablechecker, spfvalidator, dkimvalidator, dmarcvalidator'
+    required: false
+    default: 'emailvalidator'
+  params:
+    description: 'JSON parameters to pass to the API'
+    required: false
+    default: '{}'
+  output_file:
+    description: 'Path to save binary output (for APIs that return files like images, PDFs)'
+    required: false
+  format:
+    description: 'Response format: json, yaml, or xml'
+    required: false
+    default: 'json'
+  fail_on_error:
+    description: 'Whether to fail the workflow if the API returns an error'
+    required: false
+    default: 'true'
+
+outputs:
+  result:
+    description: 'The full API response as JSON'
+  data:
+    description: 'The data field from the API response as JSON'
+  status:
+    description: 'The status of the API call (ok or error)'
+  file:
+    description: 'Path to the downloaded file (if output_file was specified)'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
