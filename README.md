@@ -4,7 +4,7 @@
 
 > **Beta Release** - This action is in beta. We'd love your feedback! [Open an issue](https://github.com/apiverve/action-email-validation/issues) if you encounter any problems.
 
-[![GitHub Marketplace](https://img.shields.io/badge/Marketplace-Email Validation-blue?logo=github)](https://github.com/marketplace/actions/apiverve-email-validation)
+[![GitHub Marketplace](https://img.shields.io/badge/Marketplace-Email_Validation-blue?logo=github)](https://github.com/apiverve/action-email-validation)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **[Browse All APIs](https://apiverve.com/marketplace?utm_source=github&utm_medium=action&utm_campaign=email-validation)** | **[Get Free API Key](https://dashboard.apiverve.com/signup?utm_source=github&utm_medium=action&utm_campaign=email-validation)** | **[Documentation](https://docs.apiverve.com?utm_source=github&utm_medium=action&utm_campaign=email-validation)**
@@ -24,7 +24,7 @@ This action provides access to APIVerve's Email Validation APIs directly in your
 
 | API | Description |
 |-----|-------------|
-| `emailvalidator` | Email Validator is a simple tool for validating if an email address is valid or not. It checks the email address format and the domain records to see if the email address is valid. |
+| `emailvalidator` | Email Validator checks whether an email address is valid, deliverable and safe. It validates the format, resolves the domain&#x27;s mail (MX) records, flags disposable and role-based addresses, and returns a composite risk score with typo correction. |
 | `disposablechecker` | disposablechecker API |
 | `spfvalidator` | SPF Validator checks the Sender Policy Framework (SPF) DNS record for a domain to verify if it’s valid and optionally whether a given IP address is authorized to send emails for that domain. |
 | `dkimvalidator` | DKIM Validator checks the DomainKeys Identified Mail (DKIM) DNS records for a domain to verify that they are present and correctly formatted. |
