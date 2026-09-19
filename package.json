@@ -1,6 +1,6 @@
 {
   "name": "@apiverve/action-email-validation",
-  "version": "0.1.0-beta",
+  "version": "1.0.0",
   "description": "Validate email addresses, check deliverability, and verify email authentication records",
   "main": "dist/index.js",
   "scripts": {

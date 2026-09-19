@@ -2,8 +2,6 @@
 
 > Validate email addresses, check deliverability, and verify email authentication records
 
-> **Beta Release** - This action is in beta. We'd love your feedback! [Open an issue](https://github.com/apiverve/action-email-validation/issues) if you encounter any problems.
-
 [![GitHub Marketplace](https://img.shields.io/badge/Marketplace-Email_Validation-blue?logo=github)](https://github.com/apiverve/action-email-validation)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -24,8 +22,8 @@ This action provides access to APIVerve's Email Validation APIs directly in your
 
 | API | Description |
 |-----|-------------|
-| `emailvalidator` | Email Validator checks whether an email address is valid, deliverable and safe. It validates the format, resolves the domain&#x27;s mail (MX) records, flags disposable and role-based addresses, and returns a composite risk score with typo correction. |
-| `disposablechecker` | disposablechecker API |
+| `emailvalidator` | Email Validator checks whether an email address is valid, deliverable and safe. It validates the format, resolves the domain's mail (MX) records, flags disposable and role-based addresses, and returns a composite risk score with typo correction. |
+| `emaildisposablechecker` | Disposable Email Checker tests whether an email address belongs to a disposable email provider. Pass any email to receive its domain and a true or false flag showing if it is temporary. |
 | `spfvalidator` | SPF Validator checks the Sender Policy Framework (SPF) DNS record for a domain to verify if it’s valid and optionally whether a given IP address is authorized to send emails for that domain. |
 | `dkimvalidator` | DKIM Validator checks the DomainKeys Identified Mail (DKIM) DNS records for a domain to verify that they are present and correctly formatted. |
 | `dmarcvalidator` | DMARC Validator checks the Domain-based Message Authentication, Reporting and Conformance (DMARC) record for a domain to ensure it is correctly configured. |
@@ -40,7 +38,7 @@ This action provides access to APIVerve's Email Validation APIs directly in your
   with:
     api_key: ${{ secrets.APIVERVE_KEY }}
     api: emailvalidator
-    params: '{&quot;email&quot;: &quot;test@example.com&quot;}'
+    params: '{"email": "test@example.com"}'
 ```
 
 ---
@@ -71,17 +69,41 @@ Go to your repository **Settings** → **Secrets and variables** → **Actions**
 
 ---
 
+## Pass/fail checks
+
+Set `check` and the action stops being a plain API call: it evaluates the result and fails the job when something is wrong, so problems surface in CI instead of in production.
+
+### Gate on SPF, DKIM and DMARC
+
+Fail the job if SPF or DMARC is missing or invalid, or DMARC is not enforced
+
+```yaml
+- name: Gate on SPF, DKIM and DMARC
+  uses: apiverve/action-email-validation@v1
+  with:
+    api_key: $
+    check: email-auth
+    domain: example.com
+    dkim_selector: google
+    require_dmarc_enforced: true
+```
+
+---
+
 ## Inputs
 
 | Input | Description | Required | Default |
 |-------|-------------|----------|---------|
 | `api_key` | Your APIVerve API key (or set `APIVERVE_API_KEY` env var) | Yes* | - |
-| `api` | API to use: `emailvalidator`, `disposablechecker`, `spfvalidator`, `dkimvalidator`, `dmarcvalidator` | No | `emailvalidator` |
+| `api` | API to use: `emailvalidator`, `emaildisposablechecker`, `spfvalidator`, `dkimvalidator`, `dmarcvalidator` | No | `emailvalidator` |
 | `params` | JSON parameters for the API | No | `{}` |
 | `output_file` | Path to save binary output (images, PDFs) | No | - |
 | `format` | Response format: `json`, `yaml`, or `xml` | No | `json` |
 | `fail_on_error` | Fail workflow if API returns error | No | `true` |
-
+| `check` | Run a pass/fail check instead: `email-auth` | No | - |
+| `domain` | Domain to check | With `check` | - |
+| `dkim_selector` | DKIM selector to verify (skipped if empty) | No | - |
+| `require_dmarc_enforced` | Fail unless DMARC is `quarantine` or `reject` | No | `false` |
 *\*API key is required but can be provided via input OR `APIVERVE_API_KEY` / `APIVERVE_KEY` environment variable.*
 
 ## Outputs
@@ -92,7 +114,8 @@ Go to your repository **Settings** → **Secrets and variables** → **Actions**
 | `data` | The `data` field from response as JSON |
 | `status` | API status (`ok` or `error`) |
 | `file` | Path to downloaded file (if `output_file` was used) |
-
+| `days_remaining` | Days until expiry (`ssl-expiry`, `domain-expiry`) |
+| `records` | Matching DNS records as JSON (`dns-record`) |
 ---
 
 ## Examples
@@ -108,7 +131,7 @@ Validate an email address
   with:
     api_key: ${{ secrets.APIVERVE_KEY }}
     api: emailvalidator
-    params: '{&quot;email&quot;: &quot;test@example.com&quot;}'
+    params: '{"email": "test@example.com"}'
 
 - name: Use result
   run: echo "Result: ${{ steps.email-validation-0.outputs.data }}"
@@ -125,7 +148,7 @@ Verify SPF record configuration
   with:
     api_key: ${{ secrets.APIVERVE_KEY }}
     api: spfvalidator
-    params: '{&quot;domain&quot;: &quot;example.com&quot;}'
+    params: '{"domain": "example.com"}'
 
 - name: Use result
   run: echo "Result: ${{ steps.email-validation-1.outputs.data }}"
@@ -142,7 +165,7 @@ Verify DMARC record configuration
   with:
     api_key: ${{ secrets.APIVERVE_KEY }}
     api: dmarcvalidator
-    params: '{&quot;domain&quot;: &quot;example.com&quot;}'
+    params: '{"domain": "example.com"}'
 
 - name: Use result
   run: echo "Result: ${{ steps.email-validation-2.outputs.data }}"
@@ -173,7 +196,7 @@ jobs:
         with:
           api_key: ${{ secrets.APIVERVE_KEY }}
           api: emailvalidator
-          params: '{&quot;email&quot;: &quot;test@example.com&quot;}'
+          params: '{"email": "test@example.com"}'
 
       - name: Show result
         run: |

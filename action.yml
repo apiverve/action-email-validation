@@ -10,7 +10,7 @@ inputs:
     description: 'Your APIVerve API key. Can also be set via APIVERVE_API_KEY env var.'
     required: false
   api:
-    description: 'The API to use. Options: emailvalidator, disposablechecker, spfvalidator, dkimvalidator, dmarcvalidator'
+    description: 'The API to use. Options: emailvalidator, emaildisposablechecker, spfvalidator, dkimvalidator, dmarcvalidator'
     required: false
     default: 'emailvalidator'
   params:
@@ -24,6 +24,20 @@ inputs:
     description: 'Response format: json, yaml, or xml'
     required: false
     default: 'json'
+  check:
+    description: 'Run a pass/fail check instead of a plain API call. Options: email-auth'
+    required: false
+    default: ''
+  domain:
+    description: 'Domain to check (used with check)'
+    required: false
+  dkim_selector:
+    description: 'email-auth: DKIM selector to verify (skipped if empty)'
+    required: false
+  require_dmarc_enforced:
+    description: 'email-auth: fail unless DMARC is p=quarantine or p=reject'
+    required: false
+    default: 'false'
   fail_on_error:
     description: 'Whether to fail the workflow if the API returns an error'
     required: false
@@ -38,7 +52,11 @@ outputs:
     description: 'The status of the API call (ok or error)'
   file:
     description: 'Path to the downloaded file (if output_file was specified)'
+  days_remaining:
+    description: 'Days until expiry (ssl-expiry, domain-expiry)'
+  records:
+    description: 'Matching DNS records as JSON (dns-record)'
 
 runs:
-  using: 'node20'
+  using: 'node24'
   main: 'dist/index.js'

@@ -109,10 +109,161 @@ async function downloadFile(url, outputPath) {
 }
 
 /**
+ * Call an APIVerve API with GET params and return its data, throwing on any error
+ */
+async function callApi(api, params, apiKey) {
+  const url = new URL(`https://api.apiverve.com/v1/${api}`);
+  Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, String(value)));
+
+  for (let attempt = 0; ; attempt++) {
+    const response = await fetch(url, {
+      headers: { 'x-api-key': apiKey, 'Accept': 'application/json', 'User-Agent': 'APIVerve-GitHub-Action/1.0' }
+    });
+    if (response.status === 429 && attempt < 3) {
+      core.info(`Rate limited, retrying in ${2 * (attempt + 1)}s...`);
+      await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+      continue;
+    }
+    if (response.status === 401) throw new Error('APIVerve rejected the API key (401).');
+    if (response.status === 403) throw new Error('APIVerve returned 403: the account is likely out of credits. Check https://dashboard.apiverve.com');
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || body.status !== 'ok') {
+      throw new Error(`APIVerve ${api} failed (HTTP ${response.status}): ${body.error || 'unknown error'}`);
+    }
+    return body.data;
+  }
+}
+
+function intInput(name, def) {
+  const raw = core.getInput(name);
+  if (raw === '') return def;
+  const n = parseInt(raw, 10);
+  if (isNaN(n)) throw new Error(`Input ${name} must be a number, got "${raw}"`);
+  return n;
+}
+
+/**
+ * Pass/fail checks. Each returns { ok, summary } after warning or failing as needed.
+ */
+const checks = {
+  async 'ssl-expiry'(domain, apiKey) {
+    const warnDays = intInput('warn_days', 30);
+    const failDays = intInput('fail_days', 7);
+    const data = await callApi('sslchecker', { domain }, apiKey);
+    const days = data.daysUntilExpiry;
+    core.info(`Certificate for ${domain}: valid ${data.valid_from} to ${data.valid_to} (${days} days remaining)`);
+    core.setOutput('days_remaining', String(days));
+    core.setOutput('data', JSON.stringify(data));
+
+    if (data.isExpired) return { ok: false, summary: `SSL certificate for ${domain} has EXPIRED (${data.valid_to}).` };
+    if (data.isValid === false) return { ok: false, summary: `SSL certificate for ${domain} is not valid.` };
+    if (core.getInput('fail_on_self_signed') === 'true' && data.isSelfSigned) return { ok: false, summary: `SSL certificate for ${domain} is self-signed.` };
+    if (typeof days === 'number' && days <= failDays) return { ok: false, summary: `SSL certificate for ${domain} expires in ${days} days (fail threshold: ${failDays}).` };
+    if (typeof days === 'number' && days <= warnDays) core.warning(`SSL certificate for ${domain} expires in ${days} days (warn threshold: ${warnDays}).`);
+    return { ok: true, summary: `SSL certificate for ${domain}: ${days} days remaining.` };
+  },
+
+  async 'domain-expiry'(domain, apiKey) {
+    const warnDays = intInput('warn_days', 60);
+    const failDays = intInput('fail_days', 14);
+    const data = await callApi('domainexpiration', { domain }, apiKey);
+    const days = data.daysToExpiration;
+    core.info(`Domain ${domain}: expires ${data.expirationDate} (${days} days, status: ${data.expirationStatus})`);
+    core.setOutput('days_remaining', String(days));
+    core.setOutput('data', JSON.stringify(data));
+
+    if (typeof days !== 'number') return { ok: false, summary: `Could not determine the expiration date for ${domain}.` };
+    if (days <= 0) return { ok: false, summary: `Domain ${domain} has EXPIRED (${data.expirationDate}).` };
+    if (days <= failDays) return { ok: false, summary: `Domain ${domain} expires in ${days} days (fail threshold: ${failDays}). Renew it.` };
+    if (days <= warnDays) core.warning(`Domain ${domain} expires in ${days} days (warn threshold: ${warnDays}).`);
+    return { ok: true, summary: `Domain ${domain}: ${days} days until expiration.` };
+  },
+
+  async 'dns-record'(domain, apiKey) {
+    const recordType = (core.getInput('record_type') || 'A').toUpperCase();
+    const expected = core.getInput('expected_value');
+    const data = await callApi('dnslookup', { domain }, apiKey);
+    const records = (data.records || {})[recordType];
+    const list = records === undefined ? [] : (Array.isArray(records) ? records : [records]);
+    core.info(`${recordType} records for ${domain}: ${JSON.stringify(list)}`);
+    core.setOutput('records', JSON.stringify(list));
+    core.setOutput('data', JSON.stringify(data));
+
+    if (list.length === 0) return { ok: false, summary: `No ${recordType} records found for ${domain}.` };
+    if (expected && !list.some(r => JSON.stringify(r).toLowerCase().includes(expected.toLowerCase()))) {
+      return { ok: false, summary: `No ${recordType} record for ${domain} contains "${expected}".` };
+    }
+    return { ok: true, summary: expected
+      ? `${recordType} record for ${domain} containing "${expected}" found.`
+      : `${list.length} ${recordType} record(s) found for ${domain}.` };
+  },
+
+  async 'email-auth'(domain, apiKey) {
+    const dkimSelector = core.getInput('dkim_selector');
+    const requireEnforced = core.getInput('require_dmarc_enforced') === 'true';
+    const failures = [];
+
+    const spf = await callApi('spfvalidator', { domain }, apiKey);
+    core.info(`SPF: record=${spf.has_spf_record} valid=${spf.spf_valid} lookups=${spf.dns_lookups_num} risk=${spf.risk_level}`);
+    if (!spf.has_spf_record) failures.push(`No SPF record found for ${domain}.`);
+    else if (spf.spf_valid === false) failures.push(`SPF record for ${domain} is invalid.`);
+    else if (spf.has_issues) core.warning(`SPF for ${domain} has issues (risk: ${spf.risk_level}). Record: ${spf.spf_record}`);
+
+    if (dkimSelector) {
+      const dkim = await callApi('dkimvalidator', { domain, selector: dkimSelector }, apiKey);
+      core.info(`DKIM (${dkimSelector}): record=${dkim.has_dkim_record} valid=${dkim.valid} keyBits=${dkim.key_bits}`);
+      if (!dkim.has_dkim_record) failures.push(`No DKIM record at ${dkimSelector}._domainkey.${domain}.`);
+      else if (dkim.valid === false) failures.push(`DKIM record for selector ${dkimSelector} on ${domain} is invalid.`);
+      else (dkim.issues_found || []).forEach(i => core.warning(`DKIM: ${i.message}`));
+    }
+
+    const dmarc = await callApi('dmarcvalidator', { domain }, apiKey);
+    core.info(`DMARC: record=${dmarc.hasDmarc} valid=${dmarc.valid} policy=${dmarc.p} enforced=${dmarc.isEnforced}`);
+    if (!dmarc.hasDmarc) failures.push(`No DMARC record found for ${domain}.`);
+    else if (dmarc.valid === false) failures.push(`DMARC record for ${domain} is invalid.`);
+    else if (requireEnforced && !dmarc.isEnforced) failures.push(`DMARC policy for ${domain} is not enforced (p=${dmarc.p}).`);
+    else if (!dmarc.isEnforced) core.warning(`DMARC policy for ${domain} is p=${dmarc.p}. Consider quarantine or reject.`);
+
+    if (failures.length) {
+      failures.forEach(f => core.error(f));
+      return { ok: false, summary: `Email authentication check failed for ${domain}: ${failures.length} issue(s).` };
+    }
+    return { ok: true, summary: `SPF${dkimSelector ? ', DKIM' : ''} and DMARC look healthy for ${domain}.` };
+  }
+};
+
+async function runCheck(check, apiKey) {
+  const handler = checks[check];
+  if (!handler) {
+    core.setFailed(`Unknown check "${check}". Options: ${Object.keys(checks).join(', ')}`);
+    return;
+  }
+  const domain = core.getInput('domain');
+  if (!domain) {
+    core.setFailed(`The ${check} check needs a domain input.`);
+    return;
+  }
+
+  try {
+    const { ok, summary } = await handler(domain, apiKey);
+    core.setOutput('status', ok ? 'ok' : 'failed');
+    await core.summary
+      .addHeading(`APIVerve check: ${check}`, 3)
+      .addRaw(`${ok ? '✅' : '❌'} ${summary}`)
+      .write();
+    if (ok) core.notice(summary);
+    else core.setFailed(summary);
+  } catch (error) {
+    core.setFailed(error.message);
+  }
+}
+
+/**
  * Main action entry point
  */
 async function run() {
-  const api = core.getInput('api', { required: true });
+  const check = core.getInput('check');
+  const api = core.getInput('api');
   const paramsInput = core.getInput('params') || '{}';
   const outputFile = core.getInput('output_file');
   const failOnError = core.getInput('fail_on_error') !== 'false';
@@ -143,6 +294,16 @@ async function run() {
 
   // Mask API key in all logs
   core.setSecret(apiKey);
+
+  if (check) {
+    await runCheck(check, apiKey);
+    return;
+  }
+
+  if (!api) {
+    core.setFailed('Input required and not supplied: api (or set check to run a pass/fail check).');
+    return;
+  }
 
   let params;
   try {
@@ -193,7 +354,7 @@ async function run() {
       headers: {
         'x-api-key': apiKey,
         'Accept': formatMap[format],
-        'User-Agent': 'APIVerve-GitHub-Action/0.1'
+        'User-Agent': 'APIVerve-GitHub-Action/1.0'
       }
     };
 
